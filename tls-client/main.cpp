@@ -38,6 +38,7 @@
 #include "EthernetInterface.h"
 #include "TCPSocket.h"
 
+#include "mbedtls/config.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/entropy.h"
@@ -47,6 +48,14 @@
 #if DEBUG_LEVEL > 0
 #include "mbedtls/debug.h"
 #endif
+
+#if defined(MBEDTLS_ENTROPY_NV_SEED)
+#include "cfstore.h"
+#endif /* MBEDTLS_ENTROPY_NV_SEED */
+
+#include <inttypes.h>
+#include <stdint.h>
+#include <string.h>
 
 namespace {
 
@@ -92,6 +101,120 @@ const char SSL_CA_PEM[] = "-----BEGIN CERTIFICATE-----\n"
     "-----END CERTIFICATE-----\n";
 
 }
+
+#if defined(MBEDTLS_ENTROPY_NV_SEED)
+
+const char *nv_seed_key = MBEDTLS_ENTROPY_NV_SEED_CFSTORE_KEY;
+
+#if MBEDTLS_ENTROPY_BLOCK_SIZE == 32
+const char nv_seed_val[32] = {
+    0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5,
+    0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
+    0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0,
+    0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0
+};
+#else
+const char nv_seed_val[64] = {
+    0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5,
+    0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
+    0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0,
+    0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
+    0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC,
+    0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15,
+    0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A,
+    0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75
+};
+#endif /* MBEDTLS_ENTROPY_BLOCK_SIZE == 32 */
+
+
+static int32_t create_nv_seed_kv(const char *key, const char *val,
+                                 const size_t val_len) {
+    int32_t ret = CFSTORE_ERROR_GENERAL;
+    cfstore::cfstore_keydesc_t kdesc;
+    size_t written_len = val_len;
+    cfstore::Cfstore cfstore = cfstore::Cfstore();
+    cfstore::CfstoreKey *cfkey = NULL;
+
+    memset(&kdesc, 0x00, sizeof(kdesc));
+    kdesc.drl = CFSTORE_RETENTION_NVM;
+
+    ret = cfstore.initialize();
+    if (ret < CFSTORE_OK) {
+        printf("Failed to initialize() cfstore with error %" PRId32 "\r\n",
+            ret);
+        goto exit;
+    }
+
+    // Create the key handle.
+    cfkey = cfstore.create(key, val_len, &kdesc);
+    if (!key) {
+        printf("Failed to create() cfstore key %s\r\n", key);
+        goto uninitialize;
+    }
+
+    // Write a value to the cfstore.
+    ret = cfkey->write(val, &written_len);
+    if (ret < CFSTORE_OK) {
+        printf("Failed to write() cfstore with error %" PRId32 "\r\n", ret);
+        goto free;
+    } else if (val_len != written_len) {
+        printf("Failed to write() full seed to cfstore\r\n");
+        goto free;
+    }
+
+    // Flush cfstore.
+    ret = cfstore.flush();
+    if (ret < CFSTORE_OK) {
+        printf("Failed to flush() cfstore with error %" PRId32 "\r\n", ret);
+        goto free;
+    }
+
+free:
+    cfkey->close();
+    delete cfkey;
+
+uninitialize:
+    cfstore.uninitialize();
+
+exit:
+    return ret;
+}
+
+static int32_t find_nv_seed_kv(const char *key) {
+    int32_t ret = CFSTORE_ERROR_GENERAL;
+    cfstore::Cfstore cfstore = cfstore::Cfstore();
+    cfstore::CfstoreKey *cfkey = NULL;
+    cfstore::cfstore_fmode_t flags;
+
+    memset(&flags, 0x00, sizeof(flags));
+
+    ret = cfstore.initialize();
+    if (ret < CFSTORE_OK) {
+        printf("Failed to initialize() cfstore with error %" PRId32 "\r\n",
+            ret);
+        goto exit;
+    }
+
+    // Query the cfstore to see if the kv pair exists in nvm.
+    cfkey = cfstore.open(key, flags);
+    if (!cfkey) {
+        printf("Failed open(), key %s not present in cfstore\r\n", key);
+        goto uninitialize;
+    }
+
+    ret = CFSTORE_OK;
+
+    cfkey->close();
+    delete cfkey;
+
+uninitialize:
+    cfstore.uninitialize();
+
+exit:
+    return ret;
+}
+
+#endif /* MBEDTLS_ENTROPY_NV_SEED */
 
 /**
  * \brief HelloHTTPS implements the logic for fetching a file from a webserver
@@ -431,18 +554,40 @@ int main() {
     /* The default 9600 bps is too slow to print full TLS debug info and could
      * cause the other party to time out. */
 
-    /* Inititalise with DHCP, connect, and start up the stack */
+    int exit_code = MBEDTLS_EXIT_FAILURE;
+    const char *ip_addr;
     EthernetInterface eth_iface;
+    HelloHTTPS *hello;
+
+#if defined(MBEDTLS_ENTROPY_NV_SEED)
+    /* Create an nv seed kv pair in cfstore if one does not exist already */
+    int32_t ret = find_nv_seed_kv(nv_seed_key);
+    if (ret < CFSTORE_OK) {
+        ret = create_nv_seed_kv(nv_seed_key, nv_seed_val, sizeof(nv_seed_val));
+        if (ret < CFSTORE_OK) {
+            goto exit;
+        }
+    }
+    printf("nv seed with key \"%s\" exists in config store\r\n", nv_seed_key);
+#endif /* MBEDTLS_ENTROPY_NV_SEED */
+
+    /* Inititalise with DHCP, connect, and start up the stack */
     eth_iface.connect();
     mbedtls_printf("Using Ethernet LWIP\r\n");
-    const char *ip_addr = eth_iface.get_ip_address();
+    ip_addr = eth_iface.get_ip_address();
     if (ip_addr) {
         mbedtls_printf("Client IP Address is %s\r\n", ip_addr);
     } else {
         mbedtls_printf("No Client IP Address\r\n");
+        goto exit;
     }
 
-    HelloHTTPS *hello = new HelloHTTPS(HTTPS_SERVER_NAME, HTTPS_SERVER_PORT, &eth_iface);
+    hello = new HelloHTTPS(HTTPS_SERVER_NAME, HTTPS_SERVER_PORT, &eth_iface);
     hello->startTest(HTTPS_PATH);
     delete hello;
+
+    exit_code = MBEDTLS_EXIT_SUCCESS;
+
+exit:
+    return exit_code;
 }
