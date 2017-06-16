@@ -247,6 +247,18 @@ do {                                                \
     }                                               \
 } while( 0 )
 
+#define CTX_ALLOC( TITLE, TYPE, VAR )                                   \
+TYPE *VAR;                                                              \
+                                                                        \
+do {                                                                    \
+    if( ( VAR = (TYPE *)mbedtls_calloc( 1, sizeof( TYPE ) ) ) == NULL ) \
+    {                                                                   \
+        mbedtls_printf( HEADER_FORMAT "%s\r\n", TITLE,                  \
+                        "allocation failure" );                         \
+        return( 1 );                                                    \
+    }                                                                   \
+} while( 0 )
+
 static int myrand( void *rng_state, unsigned char *output, size_t len )
 {
     size_t use_len;
@@ -290,8 +302,6 @@ void ecp_clear_precomputed( mbedtls_ecp_group *grp )
 #define ecp_clear_precomputed( g )
 #endif
 
-unsigned char buf[BUFSIZE];
-
 typedef struct {
     char md4, md5, ripemd160, sha1, sha256, sha512,
          arc4, des3, des, aes_cbc, aes_ctr, aes_gcm, aes_ccm,
@@ -300,11 +310,13 @@ typedef struct {
          rsa, dhm, ecdsa, ecdh;
 } todo_list;
 
+unsigned char buf[BUFSIZE];
+unsigned char tmp[200];
+char title[TITLE_LEN];
+
 static int benchmark( int argc, char *argv[] )
 {
     int i;
-    unsigned char tmp[200];
-    char title[TITLE_LEN];
     todo_list todo;
 #if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
     unsigned char malloc_buf[HEAP_SIZE] = { 0 };
@@ -381,8 +393,6 @@ static int benchmark( int argc, char *argv[] )
 #if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
     mbedtls_memory_buffer_alloc_init( malloc_buf, sizeof( malloc_buf ) );
 #endif
-    memset( buf, 0xAA, sizeof( buf ) );
-    memset( tmp, 0xBB, sizeof( tmp ) );
 
 #if defined(MBEDTLS_MD4_C)
     if( todo.md4 )
@@ -417,33 +427,42 @@ static int benchmark( int argc, char *argv[] )
 #if defined(MBEDTLS_ARC4_C)
     if( todo.arc4 )
     {
-        mbedtls_arc4_context arc4;
-        mbedtls_arc4_init( &arc4 );
-        mbedtls_arc4_setup( &arc4, tmp, 32 );
-        TIME_AND_TSC( "ARC4", mbedtls_arc4_crypt( &arc4, BUFSIZE, buf, buf ) );
-        mbedtls_arc4_free( &arc4 );
+        CTX_ALLOC( "ARC4", mbedtls_arc4_context, arc4 );
+
+        mbedtls_arc4_init( arc4 );
+        mbedtls_arc4_setup( arc4, tmp, 32 );
+        TIME_AND_TSC( "ARC4", mbedtls_arc4_crypt( arc4, BUFSIZE, buf, buf ) );
+        mbedtls_arc4_free( arc4 );
+
+        mbedtls_free( arc4 );
     }
 #endif
 
 #if defined(MBEDTLS_DES_C) && defined(MBEDTLS_CIPHER_MODE_CBC)
     if( todo.des3 )
     {
-        mbedtls_des3_context des3;
-        mbedtls_des3_init( &des3 );
-        mbedtls_des3_set3key_enc( &des3, tmp );
+        CTX_ALLOC( "3DES", mbedtls_des3_context, des3 );
+
+        mbedtls_des3_init( des3 );
+        mbedtls_des3_set3key_enc( des3, tmp );
         TIME_AND_TSC( "3DES",
-                mbedtls_des3_crypt_cbc( &des3, MBEDTLS_DES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
-        mbedtls_des3_free( &des3 );
+                mbedtls_des3_crypt_cbc( des3, MBEDTLS_DES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
+        mbedtls_des3_free( des3 );
+
+        mbedtls_free( des3 );
     }
 
     if( todo.des )
     {
-        mbedtls_des_context des;
-        mbedtls_des_init( &des );
-        mbedtls_des_setkey_enc( &des, tmp );
+        CTX_ALLOC( "DES", mbedtls_des_context, des );
+
+        mbedtls_des_init( des );
+        mbedtls_des_setkey_enc( des, tmp );
         TIME_AND_TSC( "DES",
-                mbedtls_des_crypt_cbc( &des, MBEDTLS_DES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
-        mbedtls_des_free( &des );
+                mbedtls_des_crypt_cbc( des, MBEDTLS_DES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
+        mbedtls_des_free( des );
+
+        mbedtls_free( des );
     }
 #if defined(MBEDTLS_CMAC_C)
     if( todo.des3_cmac )
@@ -468,20 +487,23 @@ static int benchmark( int argc, char *argv[] )
     if( todo.aes_cbc )
     {
         int keysize;
-        mbedtls_aes_context aes;
-        mbedtls_aes_init( &aes );
+        CTX_ALLOC( "AES-CBC", mbedtls_aes_context, aes );
+
+        mbedtls_aes_init( aes );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
             mbedtls_snprintf( title, sizeof( title ), "AES-CBC-%d", keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_aes_setkey_enc( &aes, tmp, keysize );
+            mbedtls_aes_setkey_enc( aes, tmp, keysize );
 
             TIME_AND_TSC( title,
-                mbedtls_aes_crypt_cbc( &aes, MBEDTLS_AES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
+                mbedtls_aes_crypt_cbc( aes, MBEDTLS_AES_ENCRYPT, BUFSIZE, tmp, buf, buf ) );
         }
-        mbedtls_aes_free( &aes );
+        mbedtls_aes_free( aes );
+
+        mbedtls_free( aes );
     }
 #endif
 
@@ -491,20 +513,24 @@ static int benchmark( int argc, char *argv[] )
         int keysize;
         size_t nc_offset = 0;
         unsigned char stream_block[16];
-        mbedtls_aes_context aes;
-        mbedtls_aes_init( &aes );
+        CTX_ALLOC( "AES_CTR", mbedtls_aes_context, aes );
+
+        mbedtls_aes_init( aes );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
             mbedtls_snprintf( title, sizeof( title ), "AES-CTR-%d", keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_aes_setkey_enc( &aes, tmp, keysize );
+            mbedtls_aes_setkey_enc( aes, tmp, keysize );
 
             TIME_AND_TSC( title,
-                mbedtls_aes_crypt_ctr( &aes, BUFSIZE, &nc_offset, tmp, stream_block, buf, buf ) );
+                mbedtls_aes_crypt_ctr( aes, BUFSIZE, &nc_offset, tmp,
+                                       stream_block, buf, buf ) );
         }
-        mbedtls_aes_free( &aes );
+        mbedtls_aes_free( aes );
+
+        mbedtls_free( aes );
     }
 #endif
 
@@ -512,46 +538,52 @@ static int benchmark( int argc, char *argv[] )
     if( todo.aes_gcm )
     {
         int keysize;
-        mbedtls_gcm_context gcm;
+        CTX_ALLOC( "AES-GCM", mbedtls_gcm_context, gcm );
 
-        mbedtls_gcm_init( &gcm );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
+            mbedtls_gcm_init( gcm );
+
             mbedtls_snprintf( title, sizeof( title ), "AES-GCM-%d", keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_gcm_setkey( &gcm, MBEDTLS_CIPHER_ID_AES, tmp, keysize );
+            mbedtls_gcm_setkey( gcm, MBEDTLS_CIPHER_ID_AES, tmp, keysize );
 
             TIME_AND_TSC( title,
-                    mbedtls_gcm_crypt_and_tag( &gcm, MBEDTLS_GCM_ENCRYPT, BUFSIZE, tmp,
-                        12, NULL, 0, buf, buf, 16, tmp ) );
+                    mbedtls_gcm_crypt_and_tag( gcm, MBEDTLS_GCM_ENCRYPT,
+                            BUFSIZE, tmp, 12, NULL, 0, buf, buf, 16, tmp ) );
 
-            mbedtls_gcm_free( &gcm );
+            mbedtls_gcm_free( gcm );
         }
+
+        mbedtls_free( gcm );
     }
 #endif
 #if defined(MBEDTLS_CCM_C)
     if( todo.aes_ccm )
     {
         int keysize;
-        mbedtls_ccm_context ccm;
+        CTX_ALLOC( "AES-CCM", mbedtls_ccm_context, ccm );
 
-        mbedtls_ccm_init( &ccm );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
+            mbedtls_ccm_init( ccm );
+
             mbedtls_snprintf( title, sizeof( title ), "AES-CCM-%d", keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_ccm_setkey( &ccm, MBEDTLS_CIPHER_ID_AES, tmp, keysize );
+            mbedtls_ccm_setkey( ccm, MBEDTLS_CIPHER_ID_AES, tmp, keysize );
 
             TIME_AND_TSC( title,
-                    mbedtls_ccm_encrypt_and_tag( &ccm, BUFSIZE, tmp,
-                        12, NULL, 0, buf, buf, tmp, 16 ) );
+                    mbedtls_ccm_encrypt_and_tag( ccm, BUFSIZE, tmp, 12, NULL,
+                                                 0, buf, buf, tmp, 16 ) );
 
-            mbedtls_ccm_free( &ccm );
+            mbedtls_ccm_free( ccm );
         }
+
+        mbedtls_free( ccm );
     }
 #endif
 #if defined(MBEDTLS_CMAC_C)
@@ -591,21 +623,26 @@ static int benchmark( int argc, char *argv[] )
     if( todo.camellia )
     {
         int keysize;
-        mbedtls_camellia_context camellia;
-        mbedtls_camellia_init( &camellia );
+        CTX_ALLOC( "CAMELLIA-CBC", mbedtls_camellia_context, camellia );
+
+        mbedtls_camellia_init( camellia );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
-            mbedtls_snprintf( title, sizeof( title ), "CAMELLIA-CBC-%d", keysize );
+            mbedtls_snprintf( title, sizeof( title ), "CAMELLIA-CBC-%d",
+                              keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_camellia_setkey_enc( &camellia, tmp, keysize );
+            mbedtls_camellia_setkey_enc( camellia, tmp, keysize );
 
             TIME_AND_TSC( title,
-                    mbedtls_camellia_crypt_cbc( &camellia, MBEDTLS_CAMELLIA_ENCRYPT,
-                        BUFSIZE, tmp, buf, buf ) );
+                    mbedtls_camellia_crypt_cbc( camellia,
+                                                MBEDTLS_CAMELLIA_ENCRYPT,
+                                                BUFSIZE, tmp, buf, buf ) );
         }
-        mbedtls_camellia_free( &camellia );
+        mbedtls_camellia_free( camellia );
+
+        mbedtls_free( camellia );
     }
 #endif
 
@@ -613,33 +650,39 @@ static int benchmark( int argc, char *argv[] )
     if( todo.blowfish )
     {
         int keysize;
-        mbedtls_blowfish_context blowfish;
-        mbedtls_blowfish_init( &blowfish );
+        CTX_ALLOC( "BLOWFISH-CBC", mbedtls_blowfish_context, blowfish );
 
+        mbedtls_blowfish_init( blowfish );
         for( keysize = 128; keysize <= 256; keysize += 64 )
         {
-            mbedtls_snprintf( title, sizeof( title ), "BLOWFISH-CBC-%d", keysize );
+            mbedtls_snprintf( title, sizeof( title ), "BLOWFISH-CBC-%d",
+                              keysize );
 
             memset( buf, 0, sizeof( buf ) );
             memset( tmp, 0, sizeof( tmp ) );
-            mbedtls_blowfish_setkey( &blowfish, tmp, keysize );
+            mbedtls_blowfish_setkey( blowfish, tmp, keysize );
 
             TIME_AND_TSC( title,
-                    mbedtls_blowfish_crypt_cbc( &blowfish, MBEDTLS_BLOWFISH_ENCRYPT, BUFSIZE,
-                        tmp, buf, buf ) );
+                    mbedtls_blowfish_crypt_cbc( blowfish,
+                                                MBEDTLS_BLOWFISH_ENCRYPT,
+                                                BUFSIZE, tmp, buf, buf ) );
         }
+        mbedtls_blowfish_free( blowfish );
 
-        mbedtls_blowfish_free( &blowfish );
+        mbedtls_free( blowfish );
     }
 #endif
 
 #if defined(MBEDTLS_HAVEGE_C)
     if( todo.havege )
     {
-        mbedtls_havege_state hs;
-        mbedtls_havege_init( &hs );
-        TIME_AND_TSC( "HAVEGE", mbedtls_havege_random( &hs, buf, BUFSIZE ) );
-        mbedtls_havege_free( &hs );
+        CTX_ALLOC( "HAVEGE", mbedtls_havege_state, hs );
+
+        mbedtls_havege_init( hs );
+        TIME_AND_TSC( "HAVEGE", mbedtls_havege_random( hs, buf, BUFSIZE ) );
+        mbedtls_havege_free( hs );
+
+        mbedtls_free( hs );
     }
 #endif
 
@@ -722,19 +765,20 @@ static int benchmark( int argc, char *argv[] )
     defined(MBEDTLS_PEM_PARSE_C) && defined(MBEDTLS_PK_PARSE_C)
     if( todo.rsa )
     {
-        mbedtls_pk_context pk;
+        CTX_ALLOC( "RSA", mbedtls_pk_context, pk );
         mbedtls_rsa_context *rsa;
         const char *rsa_keys[] = { RSA_PRIVATE_KEY_2048, RSA_PRIVATE_KEY_4096 };
         size_t i;
 
         for( i = 0; i < sizeof( rsa_keys ) / sizeof( rsa_keys[0] ); i++ )
         {
-            mbedtls_pk_init( &pk );
-            mbedtls_pk_parse_key( &pk, (const unsigned char *) rsa_keys[i],
-                                                       strlen( rsa_keys[i] ) + 1, NULL, 0 );
-            rsa = mbedtls_pk_rsa( pk );
+            mbedtls_pk_init( pk );
+            mbedtls_pk_parse_key( pk, (const unsigned char *) rsa_keys[i],
+                                  strlen( rsa_keys[i] ) + 1, NULL, 0 );
+            rsa = mbedtls_pk_rsa( *pk );
 
-            mbedtls_snprintf( title, sizeof( title ), "RSA-%d", mbedtls_pk_get_bitlen( &pk ) );
+            mbedtls_snprintf( title, sizeof( title ), "RSA-%d",
+                              mbedtls_pk_get_bitlen( pk ) );
 
             TIME_PUBLIC( title, " public",
                     buf[0] = 0;
@@ -744,8 +788,10 @@ static int benchmark( int argc, char *argv[] )
                     buf[0] = 0;
                     ret = mbedtls_rsa_private( rsa, myrand, NULL, buf, buf ) );
 
-            mbedtls_pk_free( &pk );
+            mbedtls_pk_free( pk );
         }
+
+        mbedtls_free( pk );
     }
 #endif
 
