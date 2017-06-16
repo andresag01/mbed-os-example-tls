@@ -291,6 +291,8 @@ void ecp_clear_precomputed( mbedtls_ecp_group *grp )
 #endif
 
 unsigned char buf[BUFSIZE];
+unsigned char tmp[200];
+char title[TITLE_LEN];
 
 typedef struct {
     char md4, md5, ripemd160, sha1, sha256, sha512,
@@ -303,8 +305,6 @@ typedef struct {
 static int benchmark( int argc, char *argv[] )
 {
     int i;
-    unsigned char tmp[200];
-    char title[TITLE_LEN];
     todo_list todo;
 #if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
     unsigned char malloc_buf[HEAP_SIZE] = { 0 };
