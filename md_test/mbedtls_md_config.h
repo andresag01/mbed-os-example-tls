@@ -1,7 +1,5 @@
 /*
- *  Hello world example of using the authenticated encryption with mbed TLS
- *
- *  Copyright (C) 2016-2017, ARM Limited, All Rights Reserved
+ *  Copyright (C) 2006-2016, ARM Limited, All Rights Reserved
  *  SPDX-License-Identifier: Apache-2.0
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,24 +13,8 @@
  *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
+ *
+ *  This file is part of mbed TLS (https://tls.mbed.org)
  */
 
-#include "mbed.h"
-
-#include "authcrypt.h"
-
-#include "mbedtls/platform.h"
-
-int main() {
-    int exit_code = MBEDTLS_EXIT_SUCCESS;
-    Authcrypt *authcrypt = new Authcrypt();
-
-    if (authcrypt->run() != 0) {
-        exit_code = MBEDTLS_EXIT_FAILURE;
-        mbedtls_printf("\r\nFAIL\r\n");
-    }
-
-    delete authcrypt;
-
-    return exit_code;
-}
+#define MBEDTLS_MD5_C
