@@ -211,6 +211,7 @@ void ecp_clear_precomputed(mbedtls_ecp_group *grp)
 #define ecp_clear_precomputed(g)
 #endif /* MBEDTLS_ECP_C */
 
+static size_t buf_len = BUFSIZE;
 static unsigned char buf[BUFSIZE];
 /*
  * Buffer used to hold various data such as IV, signatures, keys, etc. ECDSA
@@ -253,98 +254,194 @@ static int myrand(void *rng_state, unsigned char *output, size_t len)
     return 0;
 }
 
-#if defined(MBEDTLS_MD4_C)
-MBED_NOINLINE static int benchmark_md4()
+static int get_function_runtime(const char *title,
+                                              const char *func_str,
+                                              int (*func_ptr)(void **),
+                                              void **func_args,
+                                              int *unavail_rets,
+                                              size_t unavail_rets_len)
 {
+    unsigned long i;
+    size_t j;
+    Timeout t;
     int ret;
 
-    BENCHMARK_FUNC_CALL("MD4", mbedtls_md4_ret(buf, BUFSIZE, tmp));
+    mbedtls_printf(HEADER_FORMAT, title);
+    fflush(stdout);
 
-exit:
+    for (i = 1, alarmed = 0, t.attach(alarm, 1.0); !alarmed; i++) {
+        if ((ret = func_ptr(func_args)) != 0) {
+            break;
+        }
+    }
+
+    for (j = 0; j < unavail_rets_len; j++) {
+        if (unavail_rets[j] == ret) {
+            mbedtls_printf("Feature unavailable\n");
+            return 0;
+        }
+    }
+
+    if (ret == 0) {
+        mbedtls_printf("%9lu KB/s\n", i * BUFSIZE / 1024);
+    } else {
+        PRINT_ERROR(ret, func_str);
+    }
 
     return ret;
+}
+
+#if defined(MBEDTLS_MD4_C)
+static int md4_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_md4_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2]);
+}
+
+static int benchmark_md4()
+{
+    void *args[3] = { &buf, &buf_len, &tmp, };
+
+    return get_function_runtime("MD4",
+                                "mbedtls_md4_ret()",
+                                md4_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_MD4_C */
 
 #if defined(MBEDTLS_MD5_C)
+static int md5_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_md5_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2]);
+}
+
 MBED_NOINLINE static int benchmark_md5()
 {
-    int ret;
+    void *args[3] = { &buf, &buf_len, &tmp, };
 
-    BENCHMARK_FUNC_CALL("MD5", mbedtls_md5_ret(buf, BUFSIZE, tmp));
-
-exit:
-
-    return ret;
+    return get_function_runtime("MD5",
+                                "mbedtls_md5_ret()",
+                                md5_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_MD5_C */
 
 #if defined(MBEDTLS_RIPEMD160_C)
-MBED_NOINLINE static int benchmark_ripemd160()
+static int ripemd160_benchmark_func_wrapper(void **args)
 {
-    int ret;
+    return mbedtls_ripemd160_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2]);
+}
 
-    BENCHMARK_FUNC_CALL("RIPEMD160", mbedtls_ripemd160_ret(buf, BUFSIZE, tmp));
+static int benchmark_ripemd160()
+{
+    void *args[3] = { &buf, &buf_len, &tmp, };
 
-exit:
-
-    return ret;
+    return get_function_runtime("RIPEMD160",
+                                "mbedtls_ripemd160_ret()",
+                                ripemd160_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_RIPEMD160_C */
 
 #if defined(MBEDTLS_SHA1_C)
-MBED_NOINLINE static int benchmark_sha1()
+static int sha1_benchmark_func_wrapper(void **args)
 {
-    int ret;
+    return mbedtls_sha1_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2]);
+}
 
-    BENCHMARK_FUNC_CALL("SHA-1", mbedtls_sha1_ret(buf, BUFSIZE, tmp));
+static int benchmark_sha1()
+{
+    void *args[3] = { &buf, &buf_len, &tmp, };
 
-exit:
-
-    return ret;
+    return get_function_runtime("SHA-1",
+                                "mbedtls_sha1_ret()",
+                                sha1_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_SHA1_C */
 
 #if defined(MBEDTLS_SHA256_C)
-MBED_NOINLINE static int benchmark_sha256()
+static int sha256_benchmark_func_wrapper(void **args)
 {
-    int ret;
+    return mbedtls_sha256_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2],
+                            *((int *)args[3]));
+}
 
-    BENCHMARK_FUNC_CALL("SHA-256", mbedtls_sha256_ret(buf, BUFSIZE, tmp, 0));
+static int benchmark_sha256()
+{
+    int is224 = 0;
+    void *args[4] = { &buf, &buf_len, &tmp, &is224, };
 
-exit:
-
-    return ret;
+    return get_function_runtime("SHA-256",
+                                "mbedtls_sha256_ret()",
+                                sha256_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_SHA256_C */
 
 #if defined(MBEDTLS_SHA512_C)
-MBED_NOINLINE static int benchmark_sha512()
+static int sha512_benchmark_func_wrapper(void **args)
 {
-    int ret;
+    return mbedtls_sha512_ret((unsigned char *)args[0],
+                           *((size_t *)args[1]),
+                           (unsigned char *)args[2],
+                            *((int *)args[3]));
+}
 
-    BENCHMARK_FUNC_CALL("SHA-512", mbedtls_sha512_ret(buf, BUFSIZE, tmp, 0));
+static int benchmark_sha512()
+{
+    int is384 = 0;
+    void *args[4] = { &buf, &buf_len, &tmp, &is384, };
 
-exit:
-
-    return ret;
+    return get_function_runtime("SHA-512",
+                                "mbedtls_sha512_ret()",
+                                sha512_benchmark_func_wrapper,
+                                args,
+                                NULL,
+                                0);
 }
 #endif /* MBEDTLS_SHA512_C */
 
 
 #if defined(MBEDTLS_ARC4_C)
-MBED_NOINLINE static int benchmark_arc4()
+static int arc4_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_arc4_crypt((mbedtls_arc4_context *)args[0],
+                              *((size_t *)args[1]),
+                              (unsigned char *)args[2],
+                              (unsigned char *)args[3]);
+}
+
+static int benchmark_arc4()
 {
     int ret = 0;
     mbedtls_arc4_context arc4;
+    void *args[4] = { &arc4, &buf_len, &buf, &buf, };
 
     mbedtls_arc4_init(&arc4);
 
     mbedtls_arc4_setup(&arc4, tmp, 32);
-    BENCHMARK_FUNC_CALL("ARC4",
-                        mbedtls_arc4_crypt(&arc4, BUFSIZE, buf, buf));
+    ret = get_function_runtime("ARC4", "mbedtls_arc4_crypt()", arc4_benchmark_func_wrapper, args, NULL, 0);
 
-exit:
     mbedtls_arc4_free(&arc4);
 
     return ret;
@@ -352,10 +449,22 @@ exit:
 #endif /* MBEDTLS_ARC4_C */
 
 #if defined(MBEDTLS_DES_C) && defined(MBEDTLS_CIPHER_MODE_CBC)
-MBED_NOINLINE static int benchmark_des3()
+static int des3_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_des3_crypt_cbc((mbedtls_des3_context *)args[0],
+                                *((int *)args[1]),
+                                *((size_t *)args[2]),
+                                (unsigned char *)args[3],
+                                (unsigned char *)args[4],
+                                (unsigned char *)args[5]);
+}
+
+static int benchmark_des3()
 {
     int ret = 0;
     mbedtls_des3_context des3;
+    int operation = MBEDTLS_DES_ENCRYPT;
+    void *args[6] = { &des3, &operation, &buf_len, &tmp, &buf, &buf };
 
     mbedtls_des3_init(&des3);
 
@@ -363,9 +472,8 @@ MBED_NOINLINE static int benchmark_des3()
         PRINT_ERROR(ret, "mbedtls_des3_set3key_enc()");
         goto exit;
     }
-    BENCHMARK_FUNC_CALL("3DES",
-                        mbedtls_des3_crypt_cbc(&des3, MBEDTLS_DES_ENCRYPT,
-                                BUFSIZE, tmp, buf, buf));
+    ret = get_function_runtime("3DES", "mbedtls_des3_crypt_cbc()",
+                                des3_benchmark_func_wrapper, args, NULL, 0);
 
 exit:
     mbedtls_des3_free(&des3);
@@ -375,10 +483,22 @@ exit:
 #endif /* MBEDTLS_DES_C && MBEDTLS_CIPHER_MODE_CBC */
 
 #if defined(MBEDTLS_DES_C) && defined(MBEDTLS_CIPHER_MODE_CBC)
-MBED_NOINLINE static int benchmark_des()
+static int des_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_des_crypt_cbc((mbedtls_des_context *)args[0],
+                                *((int *)args[1]),
+                                *((size_t *)args[2]),
+                                (unsigned char *)args[3],
+                                (unsigned char *)args[4],
+                                (unsigned char *)args[5]);
+}
+
+static int benchmark_des()
 {
     int ret = 0;
     mbedtls_des_context des;
+    int operation = MBEDTLS_DES_ENCRYPT;
+    void *args[6] = { &des, &operation, &buf_len, &tmp, &buf, &buf };
 
     mbedtls_des_init(&des);
 
@@ -386,9 +506,8 @@ MBED_NOINLINE static int benchmark_des()
         PRINT_ERROR(ret, "mbedtls_des_setkey_enc()");
         goto exit;
     }
-    BENCHMARK_FUNC_CALL("DES",
-                        mbedtls_des_crypt_cbc(&des, MBEDTLS_DES_ENCRYPT,
-                                BUFSIZE, tmp, buf, buf));
+    ret = get_function_runtime("DES", "mbedtls_des_crypt_cbc()",
+                                des_benchmark_func_wrapper, args, NULL, 0);
 
 exit:
     mbedtls_des_free(&des);
@@ -399,11 +518,20 @@ exit:
 
 #if defined(MBEDTLS_DES_C) && defined(MBEDTLS_CIPHER_MODE_CBC) && \
     defined(MBEDTLS_CMAC_C)
-MBED_NOINLINE static int benchmark_des3_cmac()
+static int des3_cmac_benchmark_func_wrapper(void **args)
+{
+    return mbedtls_cipher_cmac((const mbedtls_cipher_info_t *)args[0],
+        (unsigned char *)args[1], *((size_t *)args[2]), (unsigned char *)args[3],
+        *((size_t *)args[4]), (unsigned char *)args[5]);
+}
+
+static int benchmark_des3_cmac()
 {
     int ret = 0;
     unsigned char output[8];
     const mbedtls_cipher_info_t *cipher_info;
+    size_t bit_len = 192;
+    void *args[6] = { cipher_info, &tmp, &bit_len, &buf, &buf_len, &output };
 
     memset(buf, 0, sizeof(buf));
     memset(tmp, 0, sizeof(tmp));
@@ -414,11 +542,9 @@ MBED_NOINLINE static int benchmark_des3_cmac()
         return -1;
     }
 
-    BENCHMARK_FUNC_CALL("3DES-CMAC",
-                        mbedtls_cipher_cmac(cipher_info, tmp, 192, buf,
-                                            BUFSIZE, output));
+    ret = get_function_runtime("3DES-CMAC", "mbedtls_cipher_cmac()",
+                                des3_cmac_benchmark_func_wrapper, args, NULL, 0);
 
-exit:
     return ret;
 }
 #endif /* MBEDTLS_DES_C && MBEDTLS_CIPHER_MODE_CBC && MBEDTLS_CMAC_C */
